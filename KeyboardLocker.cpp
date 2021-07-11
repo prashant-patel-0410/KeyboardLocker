@@ -1,197 +1,222 @@
-// KeyboardLocker.cpp : Defines the entry point for the application.
+// SysTrayDemo.cpp : Defines the entry point for the application.
 //
 
-#include "framework.h"
+// Windows Header Files:
+#include <windows.h>
 #include <shellapi.h>
-#include <commctrl.h>
+// C RunTime Header Files
+#include <stdlib.h>
+#include <malloc.h>
+#include <memory.h>
+#include <tchar.h>
+
 #include "KeyboardLocker.h"
 
-#define MAX_LOADSTRING						0x0100
-#define ID_TRAY_LOCK_KEYBOARD				0x1235
-#define ID_TRAY_UNLOCK_KEYBOARD				0x1236
-#define ID_TRAY_EXIT					    0x1238
-
-// Use a guid to uniquely identify our icon
-class __declspec(uuid("9D0B8B92-4E1C-488e-A1E1-2331AFCE2CB5")) KeyboardIcon;
+#define MAX_LOADSTRING						1000
+#define ID_TRAY_LOCK_KEYBOARD				1001
+#define ID_TRAY_UNLOCK_KEYBOARD				1002
+#define ID_TRAY_EXIT					    1003
+#define	WM_USER_LOCKED						WM_USER + 1
+#define	WM_USER_UNLOCKED					WM_USER + 2
 
 // Global Variables:
 HINSTANCE hInst;                                // current instance
 HMENU hLockedMenu;								// locked menu
 HMENU hUnlockedMenu;							// unlocked menu
-WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
-WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
+NOTIFYICONDATA nidApp;
+TCHAR szTitle[MAX_LOADSTRING];					// The title bar text
+TCHAR szWindowClass[MAX_LOADSTRING];			// the main window class name
+TCHAR szApplicationToolTip[MAX_LOADSTRING];	    // the main window class name
+BOOL bDisable = FALSE;							// keep application state
+HHOOK KeyboardHook;
 
 // Forward declarations of functions included in this code module:
-ATOM                MyRegisterClass(HINSTANCE hInstance);
-BOOL                InitInstance(HINSTANCE, int);
-LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
-BOOL                AddNotificationIcon(HWND hwnd);
+ATOM				MyRegisterClass(HINSTANCE hInstance);
+BOOL				InitInstance(HINSTANCE, int);
+LRESULT CALLBACK	WndProc(HWND, UINT, WPARAM, LPARAM);
 BOOL                ChangeNotificationIcon(HWND hwnd, BOOL locked);
-BOOL                DeleteNotificationIcon();
-void                ShowContextMenu(HWND hwnd, POINT pt, BOOL locked);
 void				LockKeyboard();
 void				UnlockKeyboard();
+LRESULT CALLBACK	LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 void				Cleanup();
-LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
-HHOOK KeyboardHook;
-UINT const WMAPP_NOTIFYCALLBACK_LOCKED = WM_APP + 1;
-UINT const WMAPP_NOTIFYCALLBACK_UNLOCKED = WM_APP + 2;
 
-int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
-                     _In_opt_ HINSTANCE hPrevInstance,
-                     _In_ LPWSTR    lpCmdLine,
-                     _In_ int       nCmdShow)
+int APIENTRY _tWinMain(HINSTANCE hInstance,
+	HINSTANCE hPrevInstance,
+	LPTSTR    lpCmdLine,
+	int       nCmdShow)
 {
-    UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
+	UNREFERENCED_PARAMETER(hPrevInstance);
+	UNREFERENCED_PARAMETER(lpCmdLine);
 
-    // Initialize global strings
-    LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
-    LoadStringW(hInstance, IDC_KEYBOARDLOCKER, szWindowClass, MAX_LOADSTRING);
-    MyRegisterClass(hInstance);
+	// TODO: Place code here.
+	MSG msg;
+	HACCEL hAccelTable;
 
-    // Perform application initialization:
-    if (!InitInstance (hInstance, SW_HIDE))
-    {
-        return FALSE;
-    }
+	// Initialize global strings
+	LoadString(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
+	LoadString(hInstance, IDC_KEYBOARDLOCKER, szWindowClass, MAX_LOADSTRING);
 
-    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_KEYBOARDLOCKER));
+	MyRegisterClass(hInstance);
 
-    MSG msg;
+	// Perform application initialization:
+	if (!InitInstance(hInstance, nCmdShow))
+	{
+		return FALSE;
+	}
 
-    // Main message loop:
-    while (GetMessage(&msg, nullptr, 0, 0))
-    {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
-        {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-    }
+	hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_KEYBOARDLOCKER));
 
-    return (int) msg.wParam;
+	// Main message loop:
+	while (GetMessage(&msg, NULL, 0, 0))
+	{
+		if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
+		{
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+	}
+
+	return (int)msg.wParam;
 }
 
 ATOM MyRegisterClass(HINSTANCE hInstance)
 {
-    WNDCLASSEXW wcex;
+	WNDCLASSEX wcex;
 
-    wcex.cbSize = sizeof(WNDCLASSEX);
+	wcex.cbSize = sizeof(WNDCLASSEX);
 
-    wcex.style          = CS_HREDRAW | CS_VREDRAW;
-    wcex.lpfnWndProc    = WndProc;
-    wcex.cbClsExtra     = 0;
-    wcex.cbWndExtra     = 0;
-    wcex.hInstance      = hInstance;
-    wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_KEYBOARDLOCKER));
-    wcex.hCursor        = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
-    wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_KEYBOARDLOCKER);
-    wcex.lpszClassName  = szWindowClass;
-    wcex.hIconSm        = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
+	wcex.style = CS_HREDRAW | CS_VREDRAW;
+	wcex.lpfnWndProc = WndProc;
+	wcex.cbClsExtra = 0;
+	wcex.cbWndExtra = 0;
+	wcex.hInstance = hInstance;
+	wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_LOCKED_ICON));
+	wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
+	wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+	wcex.lpszMenuName = MAKEINTRESOURCE(IDC_KEYBOARDLOCKER);
+	wcex.lpszClassName = szWindowClass;
+	wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_LOCKED_ICON));
 
-    return RegisterClassExW(&wcex);
+	return RegisterClassEx(&wcex);
 }
 
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
-   hInst = hInstance; // Store instance handle in our global variable
+	HWND hWnd;
 
-   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+	hInst = hInstance; // Store instance handle in our global variable
 
-   if (!hWnd)
-   {
-      return FALSE;
-   }
+	hWnd = CreateWindow(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, NULL, NULL, hInstance, NULL);
 
-   // locked menu
-   hLockedMenu = CreatePopupMenu();
-   AppendMenu(hLockedMenu, MF_STRING, ID_TRAY_UNLOCK_KEYBOARD, L"Unlock");
-   //AppendMenu(hLockedMenu, MF_SEPARATOR, 0, NULL);
-   //AppendMenu(hLockedMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+	if (!hWnd)
+	{
+		return FALSE;
+	}
 
-   // unlocked menu
-   hUnlockedMenu = CreatePopupMenu();
-   AppendMenu(hUnlockedMenu, MF_STRING, ID_TRAY_LOCK_KEYBOARD, L"Lock");
-   AppendMenu(hUnlockedMenu, MF_SEPARATOR, 0, NULL);
-   AppendMenu(hUnlockedMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+	// locked menu
+	hLockedMenu = CreatePopupMenu();
+	AppendMenu(hLockedMenu, MF_STRING, ID_TRAY_UNLOCK_KEYBOARD, L"Unlock");
 
-   ShowWindow(hWnd, nCmdShow);
-   UpdateWindow(hWnd);
+	// unlocked menu
+	hUnlockedMenu = CreatePopupMenu();
+	AppendMenu(hUnlockedMenu, MF_STRING, ID_TRAY_LOCK_KEYBOARD, L"Lock");
+	AppendMenu(hUnlockedMenu, MF_SEPARATOR, 0, NULL);
+	AppendMenu(hUnlockedMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
 
-   return TRUE;
+	nidApp.cbSize = sizeof(NOTIFYICONDATA); // sizeof the struct in bytes 
+	nidApp.hWnd = (HWND)hWnd;              //handle of the window which will process this app. messages 
+	nidApp.uID = IDI_UNLOCKED_ICON;           //ID of the icon that willl appear in the system tray 
+	nidApp.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP; //ORing of all the flags 
+	nidApp.hIcon = LoadIcon(hInstance, (LPCTSTR)MAKEINTRESOURCE(IDI_UNLOCKED_ICON)); // handle of the Icon to be displayed, obtained from LoadIcon 
+	nidApp.uCallbackMessage = WM_USER_UNLOCKED;
+	LoadString(hInstance, IDS_UNLOCKED_TOOLTIP, nidApp.szTip, MAX_LOADSTRING);
+	Shell_NotifyIcon(NIM_ADD, &nidApp);
+
+	return TRUE;
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	bool isDone = false;
-	
+	int wmId, wmEvent;
+	POINT lpClickPoint;
+
 	switch (message)
-    {
-	case WM_CREATE:
-		// add the notification icon
-		AddNotificationIcon(hWnd);
-		break;
-    case WM_COMMAND:
-        {
-			int wmId = LOWORD(wParam);
-            // Parse the menu selections:
-            switch (wmId)
-            {
-				case ID_TRAY_LOCK_KEYBOARD:
-				{
-					ChangeNotificationIcon(hWnd, true);
-					LockKeyboard();
-					break;
-				}
-				case ID_TRAY_UNLOCK_KEYBOARD:
-				{
-					ChangeNotificationIcon(hWnd, false);
-					UnlockKeyboard();
-					break;
-				}
-				case ID_TRAY_EXIT:
-					DestroyWindow(hWnd);
-					break;
-				default:
-					return DefWindowProc(hWnd, message, wParam, lParam);
-            }
-        }
-        break;
-	case WMAPP_NOTIFYCALLBACK_LOCKED:
+	{
+	case WM_USER_LOCKED:
 		switch (LOWORD(lParam))
 		{
-			case WM_CONTEXTMENU:
-			{
-				POINT const pt = { LOWORD(wParam), HIWORD(wParam) };
-				ShowContextMenu(hWnd, pt, true);
-			}
+		case WM_RBUTTONDOWN:
+			UINT uFlag = MF_BYPOSITION | MF_STRING;
+			GetCursorPos(&lpClickPoint);
+			SetForegroundWindow(hWnd);
+			TrackPopupMenu(hLockedMenu, TPM_LEFTALIGN | TPM_LEFTBUTTON | TPM_BOTTOMALIGN, lpClickPoint.x, lpClickPoint.y, 0, hWnd, NULL);
+			return TRUE;
+		}
+		break;
+	case WM_USER_UNLOCKED:
+		switch (LOWORD(lParam))
+		{
+		case WM_RBUTTONDOWN:
+			UINT uFlag = MF_BYPOSITION | MF_STRING;
+			GetCursorPos(&lpClickPoint);
+			SetForegroundWindow(hWnd);
+			TrackPopupMenu(hUnlockedMenu, TPM_LEFTALIGN | TPM_LEFTBUTTON | TPM_BOTTOMALIGN, lpClickPoint.x, lpClickPoint.y, 0, hWnd, NULL);
+			return TRUE;
+		}
+	break;
+	case WM_COMMAND:
+		wmId = LOWORD(wParam);
+		wmEvent = HIWORD(wParam);
+		// Parse the menu selections:
+		switch (wmId)
+		{
+		case ID_TRAY_LOCK_KEYBOARD:
+		{
+			ChangeNotificationIcon(hWnd, true);
+			LockKeyboard();
 			break;
 		}
-		break;	
-	case WMAPP_NOTIFYCALLBACK_UNLOCKED:
-		switch (LOWORD(lParam))
+		case ID_TRAY_UNLOCK_KEYBOARD:
 		{
-			case WM_CONTEXTMENU:
-			{
-				POINT const pt = { LOWORD(wParam), HIWORD(wParam) };
-				ShowContextMenu(hWnd, pt, false);
-			}
+			ChangeNotificationIcon(hWnd, false);
+			UnlockKeyboard();
 			break;
+		}
+		case ID_TRAY_EXIT:
+			DestroyWindow(hWnd);
+			break;
+		default:
+			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
 		break;
 	case WM_DESTROY:
 		Cleanup();
-        PostQuitMessage(0);
-        break;
-    default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
-    }
-    return 0;
+		PostQuitMessage(0);
+		break;
+	default:
+		return DefWindowProc(hWnd, message, wParam, lParam);
+	}
+	return 0;
 }
 
+BOOL ChangeNotificationIcon(HWND hwnd, BOOL locked)
+{
+	if (locked)
+	{
+		nidApp.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_LOCKED_ICON));
+		nidApp.uCallbackMessage = WM_USER_LOCKED;
+		LoadString(hInst, IDS_LOCKED_TOOLTIP, nidApp.szTip, ARRAYSIZE(nidApp.szTip));
+	}
+	else
+	{
+		nidApp.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_UNLOCKED_ICON));
+		nidApp.uCallbackMessage = WM_USER_UNLOCKED;
+		LoadString(hInst, IDS_UNLOCKED_TOOLTIP, nidApp.szTip, ARRAYSIZE(nidApp.szTip));
+	}
+
+	return Shell_NotifyIcon(NIM_MODIFY, &nidApp);
+}
 void LockKeyboard()
 {
 	if (KeyboardHook != NULL)
@@ -225,74 +250,10 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 	return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
-BOOL AddNotificationIcon(HWND hwnd)
-{
-	NOTIFYICONDATA nid = { sizeof(nid) };
-	nid.hWnd = hwnd;
-	nid.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP | NIF_GUID;
-	nid.guidItem = __uuidof(KeyboardIcon);
-	nid.uCallbackMessage = WMAPP_NOTIFYCALLBACK_UNLOCKED;
-	nid.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_ICON2));
-	LoadString(hInst, IDS_UNLOCKED_TOOLTIP, nid.szTip, ARRAYSIZE(nid.szTip));
-	Shell_NotifyIcon(NIM_ADD, &nid);
-
-	// NOTIFYICON_VERSION_4 is prefered
-	nid.uVersion = NOTIFYICON_VERSION_4;
-	return Shell_NotifyIcon(NIM_SETVERSION, &nid);
-}
-
-BOOL ChangeNotificationIcon(HWND hwnd, BOOL locked)
-{
-	NOTIFYICONDATA nid = { sizeof(nid) };
-	nid.hWnd = hwnd;
-	nid.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP | NIF_GUID;
-	nid.guidItem = __uuidof(KeyboardIcon);
-
-	if (locked)
-	{
-		nid.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_ICON1));
-		nid.uCallbackMessage = WMAPP_NOTIFYCALLBACK_LOCKED;
-		LoadString(hInst, IDS_LOCKED_TOOLTIP, nid.szTip, ARRAYSIZE(nid.szTip));
-	}
-	else
-	{
-		nid.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_ICON2));
-		nid.uCallbackMessage = WMAPP_NOTIFYCALLBACK_UNLOCKED;
-		LoadString(hInst, IDS_UNLOCKED_TOOLTIP, nid.szTip, ARRAYSIZE(nid.szTip));
-	}
-
-	return Shell_NotifyIcon(NIM_MODIFY, &nid);
-}
-
-BOOL DeleteNotificationIcon()
-{
-	NOTIFYICONDATA nid = { sizeof(nid) };
-	nid.uFlags = NIF_GUID;
-	nid.guidItem = __uuidof(KeyboardIcon);
-	return Shell_NotifyIcon(NIM_DELETE, &nid);
-}
-
-void ShowContextMenu(HWND hWnd, POINT pt, BOOL locked)
-{
-	// Get current mouse position.
-	POINT curPoint;
-	GetCursorPos(&curPoint);
-
-	// should SetForegroundWindow according
-	// to original poster so the popup shows on top
-	SetForegroundWindow(hWnd);
-
-	// TrackPopupMenu blocks the app until TrackPopupMenu returns
-	if(locked)
-		TrackPopupMenu(hLockedMenu, 0, curPoint.x, curPoint.y, 0, hWnd, NULL);
-	else
-		TrackPopupMenu(hUnlockedMenu, 0, curPoint.x, curPoint.y, 0, hWnd, NULL);
-}
-
 void Cleanup()
 {
 	UnlockKeyboard();
 	DestroyMenu(hLockedMenu);
 	DestroyMenu(hUnlockedMenu);
-	DeleteNotificationIcon();
+	Shell_NotifyIcon(NIM_DELETE, &nidApp);
 }
