@@ -12,7 +12,7 @@
 
 #include "KeyboardLocker.h"
 
-#define MAX_LOADSTRING						1000
+#define MAX_LOADSTRING						100
 #define ID_TRAY_LOCK_KEYBOARD				1001
 #define ID_TRAY_UNLOCK_KEYBOARD				1002
 #define ID_TRAY_EXIT					    1003
@@ -40,10 +40,11 @@ void				UnlockKeyboard();
 LRESULT CALLBACK	LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 void				Cleanup();
 
-int APIENTRY _tWinMain(HINSTANCE hInstance,
-	HINSTANCE hPrevInstance,
-	LPTSTR    lpCmdLine,
-	int       nCmdShow)
+int APIENTRY wWinMain(
+	_In_		HINSTANCE hInstance,
+	_In_opt_	HINSTANCE hPrevInstance,
+	_In_		LPTSTR    lpCmdLine,
+	_In_		int       nCmdShow)
 {
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
